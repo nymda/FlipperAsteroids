@@ -1,0 +1,11 @@
+App(
+    appid="asteroids",
+    name="Asteroids",
+    apptype=FlipperAppType.PLUGIN,
+    entry_point="asteroids_app",
+    requires=["gui"],
+    stack_size=1 * 1024,
+    order = 30,
+    fap_icon="asteroids.png",
+    fap_category="Games",
+)
