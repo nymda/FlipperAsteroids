@@ -4,6 +4,10 @@
 #include <input/input.h>
 #include <stdlib.h>
 
+#define WND_WIDTH 128
+#define WND_HEIGHT 64
+#define SOFFSET 10.f
+
 //fps counter by p4nic4ttack
 #define FRAME_TIME 66.666666
 double delta = 1;
@@ -17,62 +21,72 @@ double getActualFps() {
   return 1000 / ((double)FRAME_TIME * (double)delta);
 }
 
+float randFloat(float min, float max) {
+    return min + (((float) rand()) / (float) RAND_MAX) * (max - min);
+}
+
 float pi = 3.1415926535;
 float shipScale = 0.125;
 bool thrusting = false;
 
-typedef enum {
-    EventTypeTick,
-    EventTypeKey,
-} EventType;
-
-typedef struct {
-    EventType type;
-    InputEvent input;
-} PluginEvent;
-
-struct fVec2{
+typedef struct{
     float X;
     float Y;
+}fVec2;
+
+typedef struct{
+    fVec2 position;
+    float angle;
+}startPos;
+
+startPos spawnPositions[] = {
+	{{-SOFFSET             ,  -SOFFSET            }, 0.25f * 3.1415926535}, //TL
+	{{WND_WIDTH / 2.f      ,  -SOFFSET            }, 0.50f * 3.1415926535}, //TM
+	{{WND_WIDTH + 10.f     ,  -SOFFSET            }, 0.75f * 3.1415926535}, //TR
+	{{-SOFFSET             ,  WND_HEIGHT / 2.f    }, 0.00f * 3.1415926535}, //ML
+	{{WND_WIDTH + SOFFSET  ,  WND_HEIGHT / 2.f    }, 1.00f * 3.1415926535}, //MR
+	{{-SOFFSET             ,  WND_HEIGHT + SOFFSET}, 1.75f * 3.1415926535}, //BL
+	{{WND_WIDTH / 2.f      ,  WND_HEIGHT + SOFFSET}, 0.50f * 3.1415926535}, //BM
+	{{WND_WIDTH + SOFFSET  ,  WND_HEIGHT + SOFFSET}, 1.25f * 3.1415926535}, //BR
 };
 
-struct bullet{
+typedef struct{
     int index;
     bool active;
-    struct fVec2 position;
-    struct fVec2 heading;
-};
+    fVec2 position;
+    fVec2 heading;
+}bullet;
 
-struct asteroid{
-    struct fVec2 position;
-    struct fVec2 heading;
+typedef struct{
+    fVec2 position;
+    fVec2 heading;
+    fVec2 points[5]; //X: length, Y: angle
     float angle;
     float rVelocity;
     float velocity;
-    float points[5];
     float hitRadius;
-};
+}asteroid;
 
-struct asteroidSet{
+typedef struct{
     int stage; //0: inactive, 1: whole, 2: split
-    struct asteroid primary; //used during stage 1 & 2
-    struct asteroid secondary; //used during stage 2 only
-};
+    asteroid primary; //used during stage 1 & 2
+    asteroid secondary; //used during stage 2 only
+}asteroidSet;
 
-struct ship{
-    struct bullet bullets[16]; //only 16 bullets can exist on screen at once. you shouldnt need more than that.
-    struct fVec2 position;
-    struct fVec2 heading;
-    struct fVec2 velocity; //velocity is independant to heading
+typedef struct{
+    bullet bullets[16]; //only 16 bullets can exist on screen at once. you shouldnt need more than that.
+    fVec2 position;
+    fVec2 heading;
+    fVec2 velocity; //velocity is independant to heading
     float angle;
     float rotationalVelocity;
-};
+}ship;
 
-struct ship gShip;
-struct asteroidSet asteroids[8];
+ship gShip;
+asteroidSet asteroids[8];
 
-struct fVec2 getPoint(struct fVec2 start, float length, float angle){
-    struct fVec2 nPos = { start.X + ((float)cos(angle) * length), start.Y + ((float)sin(angle) * length) };
+fVec2 getPoint(fVec2 start, float length, float angle){
+    fVec2 nPos = { start.X + ((float)cos(angle) * length), start.Y + ((float)sin(angle) * length) };
     return nPos;
 }
 
@@ -88,15 +102,50 @@ void fireBullet(){
     }
 }
 
+void buildAsteroid(asteroid* asteroid, bool small, fVec2 position, float angle){
+    asteroid->position.X = position.X;
+    asteroid->position.Y = position.Y;
+    asteroid->angle = angle;
+    asteroid->rVelocity = randFloat(0.1f, 0.3f);
+    asteroid->velocity = randFloat(0.5f, 1.f);
+    asteroid->hitRadius = 0.f;
+
+    float dX = cos(asteroid->angle);
+    float dY = sin(asteroid->angle);
+
+    float v2cLen = sqrt(dX * dX + dY * dY);
+    asteroid->heading.X = (dX / v2cLen) * asteroid->velocity;
+    asteroid->heading.Y = (dY / v2cLen) * asteroid->velocity;
+
+    for(int i = 0; i < 5; i++){
+        if(small){ asteroid->points[i].X = randFloat(2.f, 4.f); }
+        else{ asteroid->points[i].X = randFloat(5.f, 7.f); }
+        if(asteroid->points[i].X > asteroid->hitRadius){ asteroid->hitRadius = asteroid->points[i].X; }
+        asteroid->points[i].Y = 1.25663f * (float)i;
+    }
+}
+
+void spawnNextAsteroid(){
+    for(int i = 0; i < 5; i++){
+        if(asteroids[i].stage == 0){
+            int sp = (rand() % 8);
+            float offset = randFloat(-(0.25 * pi), (0.25 * pi));
+            buildAsteroid(&asteroids[i].primary, (rand() % 2 == 1), spawnPositions[sp].position, spawnPositions[sp].angle + offset);
+            asteroids[i].stage = 1;
+            break;
+        }
+    }
+}
+
 void resetShip(){
-    gShip.position.X = 128.f / 2.f;
-    gShip.position.Y = 64.f / 2.f;
-    gShip.heading.X = 0.f;
-    gShip.heading.Y = 0.f;
+    gShip.position.X = WND_WIDTH / 2;
+    gShip.position.Y = WND_HEIGHT / 2;
     gShip.velocity.X = 0.f;
     gShip.velocity.Y = 0.f;
     gShip.angle = 0.f;
     gShip.rotationalVelocity = 0.f;
+    gShip.heading.X = cos(gShip.angle + (pi * 1.5));
+    gShip.heading.Y = sin(gShip.angle + (pi * 1.5));
 }
 
 float r2dp(float var)
@@ -118,7 +167,7 @@ void recalculate(){
         gShip.heading.Y = sin(gShip.angle + (pi * 1.5));
     }
 
-    struct fVec2 nextPos;
+    fVec2 nextPos;
     nextPos.X = gShip.position.X + gShip.velocity.X;
     nextPos.Y = gShip.position.Y + gShip.velocity.Y;
 
@@ -128,50 +177,95 @@ void recalculate(){
     gShip.velocity.X -= (gShip.velocity.X / 25.f);
     gShip.velocity.Y -= (gShip.velocity.Y / 25.f);
 
-    if (gShip.position.X > 128) { gShip.position.X -= 128; }
-    else if (gShip.position.X < 0) { gShip.position.X += 128; }
+    if (gShip.position.X > WND_WIDTH) { gShip.position.X -= WND_WIDTH; }
+    else if (gShip.position.X < 0) { gShip.position.X += WND_WIDTH; }
 
-    if (gShip.position.Y > 64) { gShip.position.Y -= 64; }
-    else if (gShip.position.Y < 0) { gShip.position.Y += 64; }
+    if (gShip.position.Y > WND_HEIGHT) { gShip.position.Y -= WND_HEIGHT; }
+    else if (gShip.position.Y < 0) { gShip.position.Y += WND_HEIGHT; }
 
+    //recalculate bullet positions and check if any hit an asteroid
     for(int i = 0; i < 16; i++){
         if(gShip.bullets[i].active){
             gShip.bullets[i].position.X += gShip.bullets[i].heading.X * 5.f;
             gShip.bullets[i].position.Y += gShip.bullets[i].heading.Y * 5.f;
 
-            if(gShip.bullets[i].position.X > 128 || gShip.bullets[i].position.X < 0){
+            if(gShip.bullets[i].position.X > WND_WIDTH || gShip.bullets[i].position.X < 0){
                 gShip.bullets[i].active = false;
             }
-            else if(gShip.bullets[i].position.Y > 128 || gShip.bullets[i].position.Y < 0){
+            else if(gShip.bullets[i].position.Y > WND_WIDTH || gShip.bullets[i].position.Y < 0){
                 gShip.bullets[i].active = false;
             }
+
+            for(int i = 0; i < 8; i++){
+                if(asteroids[i].stage == 0){ continue; }
+                float dist = sqrt(pow(gShip.bullets[i].position.X - asteroids[i].primary.position.X, 2) + pow(gShip.bullets[i].position.Y - asteroids[i].primary.position.Y, 2));
+                if(dist <= asteroids[i].primary.hitRadius){
+                    asteroids[i].stage = 0;
+                    gShip.bullets[i].active = false;
+                }
+            }
+        }
+    }
+
+    //recalculate asteroid positions
+    for(int i = 0; i < 8; i++){
+        if(asteroids[i].stage == 0){ continue; }
+        asteroids[i].primary.angle += asteroids[i].primary.rVelocity;
+        asteroids[i].primary.position.X += asteroids[i].primary.heading.X;
+        asteroids[i].primary.position.Y += asteroids[i].primary.heading.Y;
+
+        if(asteroids[i].primary.position.X < -SOFFSET || asteroids[i].primary.position.X > WND_WIDTH + SOFFSET){
+            asteroids[i].stage = 0;
+        }
+        else if(asteroids[i].primary.position.Y < -SOFFSET || asteroids[i].primary.position.Y > WND_HEIGHT + SOFFSET){
+            asteroids[i].stage = 0;
         }
     }
 }
 
+uint32_t fCounter = 0;
 static void draw_callback(Canvas* canvas, void* ctx) {
+    if(fCounter++ % 15 == 0){
+        spawnNextAsteroid();
+    }
+
     UNUSED(ctx);
     canvas_clear(canvas);
-    canvas_draw_frame(canvas, 0, 0, 128, 64);
+    canvas_draw_frame(canvas, 0, 0, WND_WIDTH, WND_HEIGHT);
 
 	char buf[4];
 	itoa(getActualFps(), buf, 10);
     canvas_draw_str(canvas, 5, 10, buf);
 
-    struct fVec2 shipPosFront = getPoint(gShip.position, 3.75f, gShip.angle + 4.712f);
-    struct fVec2 shipPosLeft = getPoint(gShip.position, 3.75f, gShip.angle + 2.199f);
-    struct fVec2 shipPosRight = getPoint(gShip.position, 3.75f, gShip.angle + 0.942f);
+    //draw ship
+    fVec2 shipPosFront = getPoint(gShip.position, 4.f, gShip.angle + 4.712f);
+    fVec2 shipPosLeft = getPoint(gShip.position, 4.f, gShip.angle + 2.199f);
+    fVec2 shipPosRight = getPoint(gShip.position, 4.f, gShip.angle + 0.942f);
 
     canvas_draw_line(canvas, shipPosFront.X, shipPosFront.Y, shipPosLeft.X, shipPosLeft.Y);
-    canvas_draw_line(canvas, shipPosLeft.X, shipPosLeft.Y, gShip.position.X, gShip.position.Y);
-    canvas_draw_line(canvas, gShip.position.X, gShip.position.Y, shipPosRight.X, shipPosRight.Y);
+    canvas_draw_line(canvas, shipPosLeft.X, shipPosLeft.Y, shipPosRight.X, shipPosRight.Y);
     canvas_draw_line(canvas, shipPosRight.X, shipPosRight.Y, shipPosFront.X, shipPosFront.Y);
 
     if(thrusting){
-        struct fVec2 shipPosBack = getPoint(gShip.position, 3.75f, gShip.angle + 1.570f);
+        fVec2 shipPosBack = getPoint(gShip.position, 3.75f, gShip.angle + 1.570f);
         canvas_draw_circle(canvas, shipPosBack.X, shipPosBack.Y, 1);
     }
 
+    //draw asteroids
+    for(int i = 0; i < 8; i++){
+        if(asteroids[i].stage == 0){ continue; }
+
+        fVec2 primaryPoints[5];
+        for(int ps = 0; ps < 5; ps++){
+            primaryPoints[ps] = getPoint(asteroids[i].primary.position, asteroids[i].primary.points[ps].X, asteroids[i].primary.points[ps].Y + asteroids[i].primary.angle);
+        }
+        for(int d = 0; d < 5; d++){
+            if(d == 4){ canvas_draw_line(canvas, primaryPoints[0].X, primaryPoints[0].Y, primaryPoints[4].X, primaryPoints[4].Y); }
+            else{ canvas_draw_line(canvas, primaryPoints[d].X, primaryPoints[d].Y, primaryPoints[d+1].X, primaryPoints[d+1].Y); }
+        }
+    }
+
+    //draw bullets
     for(int i = 0; i < 16; i++){
         if(gShip.bullets[i].active){
             canvas_draw_circle(canvas, gShip.bullets[i].position.X, gShip.bullets[i].position.Y, 1);
@@ -191,7 +285,7 @@ static void timer_callback(FuriMessageQueue* event_queue) {
     recalculate();
 }
 
-int32_t asteroids_app(void* p) { 
+int32_t asteroids_app(void* p) {
     UNUSED(p);
 
     InputEvent event;
@@ -227,20 +321,20 @@ int32_t asteroids_app(void* p) {
             if(event.type == InputTypeRelease) {
                 thrusting = false;
             }
-            
+
             //increase heading vector
             gShip.velocity.X += gShip.heading.X * 0.5f;
             gShip.velocity.Y += gShip.heading.Y * 0.5f;
         }
         if(event.key == InputKeyRight) {
             //angle right
-            if (gShip.rotationalVelocity < 0.50f) {
+            if (gShip.rotationalVelocity < 0.40f) {
                 gShip.rotationalVelocity += 0.15f;
             }
         }
         if(event.key == InputKeyLeft) {
             //angle left
-            if (gShip.rotationalVelocity > -0.50f) {
+            if (gShip.rotationalVelocity > -0.40f) {
                 gShip.rotationalVelocity -= 0.15f;
             }
         }
